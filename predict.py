@@ -44,8 +44,64 @@ data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
 
 
 # ============================================================
+# CREATE LAG + ROLLING FEATURES
+# ============================================================
+
+print("\nCreating lag and rolling features...")
+
+# Lag features - shift to avoid leakage
+data["Lag_1"] = data.groupby(["Store ID", "Product ID"])["Units Sold"].shift(1)
+data["Lag_7"] = data.groupby(["Store ID", "Product ID"])["Units Sold"].shift(7)
+data["Lag_14"] = data.groupby(["Store ID", "Product ID"])["Units Sold"].shift(14)
+data["Lag_30"] = data.groupby(["Store ID", "Product ID"])["Units Sold"].shift(30)
+
+# Rolling statistics (shift to avoid leakage)
+for window in [7, 14, 30]:
+    data[f"Rolling_{window}_mean"] = (
+        data.groupby(["Store ID", "Product ID"])["Units Sold"]
+            .shift(1).rolling(window, min_periods=1).mean()
+    )
+    data[f"Rolling_{window}_std"] = (
+        data.groupby(["Store ID", "Product ID"])["Units Sold"]
+            .shift(1).rolling(window, min_periods=1).std()
+    )
+
+# Rolling price features
+data["Rolling_Price_7"] = (
+    data.groupby(["Store ID", "Product ID"])["Price"]
+        .shift(1).rolling(7, min_periods=1).mean()
+)
+data["PriceChange_7"] = data["Price"] - data["Rolling_Price_7"]
+
+# Rolling inventory features
+data["Rolling_Inventory_7"] = (
+    data.groupby(["Store ID", "Product ID"])["Inventory Level"]
+        .shift(1).rolling(7, min_periods=1).mean()
+)
+data["InventoryChange_7"] = data["Inventory Level"] - data["Rolling_Inventory_7"]
+
+print("Lag and rolling features created.")
+
+
+# ============================================================
 # PREPARE TARGET AND FEATURES
 # ============================================================
+
+# Fill NaN values in rolling features (they can have NaN at the start)
+# Forward fill within each group, then fill remaining with 0
+for col in data.columns:
+    if 'Rolling' in col or 'Lag' in col:
+        # Forward fill within each store-product group
+        data[col] = data.groupby(["Store ID", "Product ID"])[col].ffill()
+        # Fill any remaining NaN with 0
+        data[col] = data[col].fillna(0)
+
+# Drop rows where Lag_1 is still missing (very beginning of time series)
+data = data.dropna(subset=["Lag_1"])
+
+# Final check: fill any remaining NaN values in numeric columns
+numeric_cols_before = data.select_dtypes(include=[np.number]).columns
+data[numeric_cols_before] = data[numeric_cols_before].fillna(0)
 
 y = data["Units Sold"]
 X = data.drop(columns=["Units Sold", "Date"])
@@ -82,8 +138,10 @@ preprocessor = ColumnTransformer(
 # ============================================================
 
 print("\n" + "="*70)
-print("BASELINE LINEAR REGRESSION MODEL")
+print("LINEAR REGRESSION MODEL WITH LAG & ROLLING FEATURES")
 print("="*70)
+print(f"\nData shape after lag features: {data.shape}")
+print(f"Number of lag/rolling features added: {len([col for col in numeric_cols if 'Lag' in col or 'Rolling' in col])}")
 
 # Create pipeline
 linear_model = LinearRegression()

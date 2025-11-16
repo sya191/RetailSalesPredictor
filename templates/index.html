@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Retail Demand Model Trainer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <div class="card">
+      <h1>Retail Demand Model Trainer</h1>
+      <p class="subtitle">
+        This page calls <code>train_inventory_model()</code> from <code>predict.py</code>.
+        Click the button to train the model on <code>retail_store_inventory.csv</code>
+        and see cross-validation performance plus the top features.
+      </p>
+
+      <form method="post">
+        <button type="submit">🚀 Train / Retrain Model</button>
+      </form>
+
+      {% if not metrics %}
+        <p class="hint">
+          No results yet. Click the button to run training using the backend code in <code>predict.py</code>.
+        </p>
+      {% endif %}
+
+      {% if metrics %}
+        <div class="grid">
+          <section class="panel">
+            <h2>Cross-validation RMSE</h2>
+            <ul class="metric-list">
+              {% for rmse in metrics.rmse_scores %}
+                <li>
+                  <span class="metric-badge">Fold {{ loop.index }}</span>
+                  RMSE: {{ "%.2f"|format(rmse) }}
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="mean-metric">
+              Mean RMSE: {{ "%.2f"|format(metrics.mean_rmse) }}
+            </p>
+            <p class="hint">
+              Lower RMSE means better predictions for <strong>Units Sold</strong>.
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2>Top 10 Features</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Mean Coefficient</th>
+                  <th>|Mean|</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in top_features %}
+                  <tr>
+                    <td><span class="badge-pill">{{ row["Feature"] }}</span></td>
+                    <td>{{ "%.3f"|format(row["Mean Coefficient"]) }}</td>
+                    <td>{{ "%.3f"|format(row["Abs(Mean)"]) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <p class="hint">
+              Coefficients are averaged across cross-validation folds after preprocessing.
+            </p>
+          </section>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

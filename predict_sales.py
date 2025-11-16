@@ -319,43 +319,56 @@ def predict_sales_for_date(store_id, product_id, target_date, model, historical_
 
 def predict_sales_for_week(store_id, product_id, week_start_date, model, historical_data):
     """
-    Predict sales for a full week starting from a given date.
-    
-    This function generates daily predictions for 7 consecutive days starting
-    from the specified week_start_date.
-    
-    Parameters:
-    -----------
-    store_id : str
-        Store identifier (e.g., "S001", "S002")
-    product_id : str
-        Product identifier (e.g., "P0001", "P0002")
-    week_start_date : str or pd.Timestamp
-        Starting date of the week. Can be a string in format "YYYY-MM-DD"
-        or a pandas Timestamp object (e.g., "2023-01-15")
-    model : sklearn.pipeline.Pipeline
-        Trained scikit-learn pipeline containing preprocessor and model
-    historical_data : pd.DataFrame
-        DataFrame containing historical sales data needed to create lag and
-        rolling features
-    
-    Returns:
-    --------
-    dict
-        Dictionary where keys are dates (format: "YYYY-MM-DD") and values are
-        predicted units sold for each day of the week.
+    Predict sales for a full week recursively.
+
+    Each day's prediction is appended back into the historical_data
+    so that lag features update properly for the next day.
     """
     if isinstance(week_start_date, str):
         week_start_date = pd.to_datetime(week_start_date)
+
+    # We must work on a COPY so we don't mutate original historical data
+    hist = historical_data.copy()
     
+    # Filter just the store+product to speed things up
+    store_product_hist = hist[
+        (hist["Store ID"] == store_id) &
+        (hist["Product ID"] == product_id)
+    ].sort_values("Date").copy()
+
+    if store_product_hist.empty:
+        raise ValueError(f"No historical data for {store_id}, {product_id}")
+
     predictions = {}
+
+    # Extract static features that don't change into the future (price, inventory, etc.)
+    last_known_price = float(store_product_hist["Price"].iloc[-1])
+    last_known_inventory = float(store_product_hist["Inventory Level"].iloc[-1])
+
     for i in range(7):
         current_date = week_start_date + pd.Timedelta(days=i)
         date_str = current_date.strftime("%Y-%m-%d")
-        predictions[date_str] = predict_sales_for_date(
-            store_id, product_id, current_date, model, historical_data
-        )
-    
+
+        # ---- 1. Create feature row for this day (recursive) ----
+        feature_row = _create_features_for_date(store_id, product_id, current_date, hist)
+
+        # ---- 2. Predict ----
+        pred = model.predict(feature_row)[0]
+        pred = max(0.0, float(pred))
+        predictions[date_str] = pred
+
+        # ---- 3. Append this prediction into history ----
+        new_row = {
+            "Store ID": store_id,
+            "Product ID": product_id,
+            "Date": current_date,
+            "Units Sold": pred,
+            "Price": last_known_price,
+            "Inventory Level": last_known_inventory,
+        }
+
+        hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
+
     return predictions
 
 
@@ -444,3 +457,6 @@ def predict_sales(store_id, product_id, date_or_week, is_week=False):
         return predict_sales_for_week(store_id, product_id, date_or_week, model, historical_data)
     else:
         return predict_sales_for_date(store_id, product_id, date_or_week, model, historical_data)
+    
+
+print(predict_sales("S005", "P0020", "2024-01-30", True))

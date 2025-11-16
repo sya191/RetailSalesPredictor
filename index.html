@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sales Prediction Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-logo">📈</span>
+      <span class="brand-name">Sales Forecast Trainer</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Left column: training + prediction controls -->
+    <section class="panel">
+      <h1 class="page-title">Model Control Panel</h1>
+      <p class="page-subtitle">
+        Use the controls below to train your model on the uploaded sales data and generate forecasts.
+      </p>
+
+      <!-- TRAINING CARD -->
+      <section class="card">
+        <h2>1. Train / Retrain Model</h2>
+        <p class="card-description">
+          Click the button to train (or retrain) the model using <code>sales_data.csv</code>.
+          The backend should use your <code>predict.py</code> / <code>predict_sales.py</code> logic.
+        </p>
+
+        <button id="train-btn" class="primary-btn">Train Model</button>
+
+        <div id="train-status" class="status-message"></div>
+
+        <div id="train-metrics" class="metrics-grid hidden">
+          <!-- Filled dynamically -->
+        </div>
+      </section>
+
+      <!-- PREDICTION CARD -->
+      <section class="card">
+        <h2>2. Make Predictions</h2>
+        <p class="card-description">
+          After training, predict units sold for a given store, product, and date.
+        </p>
+
+        <form id="predict-form" class="form-grid">
+          <label>
+            Store ID
+            <input type="number" id="store-id" name="store_id" required />
+          </label>
+
+          <label>
+            Product ID
+            <input type="number" id="product-id" name="product_id" required />
+          </label>
+
+          <label>
+            Date
+            <input type="date" id="date" name="date" required />
+          </label>
+
+          <label class="checkbox-label">
+            <input type="checkbox" id="is-week" name="is_week" />
+            Predict for the full week starting on this date
+          </label>
+
+          <button type="submit" class="primary-btn">Predict</button>
+        </form>
+
+        <div id="predict-status" class="status-message"></div>
+
+        <div id="prediction-results" class="table-wrapper hidden">
+          <!-- Filled dynamically -->
+        </div>
+      </section>
+    </section>
+
+    <!-- Right column: logs + plots -->
+    <section class="panel panel-secondary">
+      <!-- TRAIN LOGS -->
+      <section class="card">
+        <h2>Training Log</h2>
+        <pre id="log-output" class="log-output">
+Click "Train Model" to see log messages from the backend here.
+        </pre>
+      </section>
+
+      <!-- PLOT PREVIEW -->
+      <section class="card">
+        <h2>Model Performance Plot</h2>
+        <p class="card-description">
+          After training, the backend can save a plot (e.g.,
+          <code>model_accuracy_comparison.png</code>) and return its URL.
+        </p>
+
+        <div class="plot-wrapper">
+          <img
+            id="results-plot"
+            class="plot-image hidden"
+            src=""
+            alt="Model accuracy comparison plot"
+          />
+          <p id="plot-placeholder" class="plot-placeholder">
+            No plot loaded yet. Train the model to see the latest performance plot.
+          </p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Backend: Python (<code>predict.py</code> / <code>predict_sales.py</code>)</span>
+  </footer>
+
+  <script>
+    // Helper to show/hide elements
+    function showElement(el) {
+      el.classList.remove("hidden");
+    }
+    function hideElement(el) {
+      el.classList.add("hidden");
+    }
+
+    // TRAIN MODEL
+    const trainBtn = document.getElementById("train-btn");
+    const trainStatus = document.getElementById("train-status");
+    const trainMetrics = document.getElementById("train-metrics");
+    const logOutput = document.getElementById("log-output");
+    const plotImg = document.getElementById("results-plot");
+    const plotPlaceholder = document.getElementById("plot-placeholder");
+
+    trainBtn.addEventListener("click", async () => {
+      trainStatus.textContent = "Training model, please wait...";
+      trainStatus.classList.remove("error");
+      trainStatus.classList.add("info");
+      hideElement(trainMetrics);
+
+      try {
+        // Adjust URL if your backend uses a different route
+        const response = await fetch("/train", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Expected JSON structure (you can adapt your backend to this):
+        // {
+        //   "success": true,
+        //   "message": "Training complete",
+        //   "model_name": "DecisionTreeRegressor",
+        //   "train_rmse": 123.4,
+        //   "test_rmse": 234.5,
+        //   "metrics": { "Baseline": 300.1, "Linear Regression": 210.3, ... },
+        //   "log": "text log...",
+        //   "plot_url": "/static/model_accuracy_comparison.png"
+        // }
+
+        if (!data.success) {
+          throw new Error(data.message || "Training failed.");
+        }
+
+        trainStatus.textContent = data.message || "Training complete.";
+        trainStatus.classList.remove("info");
+        trainStatus.classList.remove("error");
+        trainStatus.classList.add("success");
+
+        // Update metrics grid
+        trainMetrics.innerHTML = "";
+
+        if (data.model_name) {
+          const modelDiv = document.createElement("div");
+          modelDiv.className = "metric-item metric-main";
+          modelDiv.innerHTML = `
+            <span class="metric-label">Best Model</span>
+            <span class="metric-value">${data.model_name}</span>
+          `;
+          trainMetrics.appendChild(modelDiv);
+        }
+
+        if (typeof data.train_rmse !== "undefined") {
+          const el = document.createElement("div");
+          el.className = "metric-item";
+          el.innerHTML = `
+            <span class="metric-label">Train RMSE</span>
+            <span class="metric-value">${data.train_rmse.toFixed
+              ? data.train_rmse.toFixed(2)
+              : data.train_rmse}</span>
+          `;
+          trainMetrics.appendChild(el);
+        }
+
+        if (typeof data.test_rmse !== "undefined") {
+          const el = document.createElement("div");
+          el.className = "metric-item";
+          el.innerHTML = `
+            <span class="metric-label">Test RMSE</span>
+            <span class="metric-value">${data.test_rmse.toFixed
+              ? data.test_rmse.toFixed(2)
+              : data.test_rmse}</span>
+          `;
+          trainMetrics.appendChild(el);
+        }
+
+        if (data.metrics && typeof data.metrics === "object") {
+          Object.entries(data.metrics).forEach(([name, value]) => {
+            const el = document.createElement("div");
+            el.className = "metric-item metric-small";
+            el.innerHTML = `
+              <span class="metric-label">${name}</span>
+              <span class="metric-value">${value.toFixed
+                ? value.toFixed(2)
+                : value}</span>
+            `;
+            trainMetrics.appendChild(el);
+          });
+        }
+
+        if (trainMetrics.children.length > 0) {
+          showElement(trainMetrics);
+        }
+
+        // Update log
+        if (data.log) {
+          logOutput.textContent = data.log;
+        } else {
+          logOutput.textContent =
+            "Training completed. (Backend did not send detailed logs.)";
+        }
+
+        // Update plot
+        if (data.plot_url) {
+          plotImg.src = data.plot_url;
+        } else {
+          // Default to a common path if your backend saves the image there
+          plotImg.src = "/static/model_accuracy_comparison.png";
+        }
+
+        plotImg.onload = () => {
+          showElement(plotImg);
+          plotPlaceholder.textContent = "Latest performance plot:";
+        };
+        plotImg.onerror = () => {
+          hideElement(plotImg);
+          plotPlaceholder.textContent =
+            "Plot image not found. Make sure the backend saves and serves the plot.";
+        };
+      } catch (err) {
+        console.error(err);
+        trainStatus.textContent = "Error during training: " + err.message;
+        trainStatus.classList.remove("info");
+        trainStatus.classList.remove("success");
+        trainStatus.classList.add("error");
+      }
+    });
+
+    // PREDICTIONS
+    const predictForm = document.getElementById("predict-form");
+    const predictStatus = document.getElementById("predict-status");
+    const predictionWrapper = document.getElementById("prediction-results");
+
+    predictForm.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      predictStatus.textContent = "Sending prediction request...";
+      predictStatus.classList.remove("error");
+      predictStatus.classList.add("info");
+      hideElement(predictionWrapper);
+
+      const storeId = document.getElementById("store-id").value;
+      const productId = document.getElementById("product-id").value;
+      const date = document.getElementById("date").value;
+      const isWeek = document.getElementById("is-week").checked;
+
+      try {
+        const response = await fetch("/predict", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            store_id: Number(storeId),
+            product_id: Number(productId),
+            date: date,
+            is_week: isWeek,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Expected JSON structure:
+        // For single-day:
+        // {
+        //   "success": true,
+        //   "prediction_type": "day",
+        //   "date": "2024-01-01",
+        //   "units_sold": 123.45
+        // }
+        //
+        // For week:
+        // {
+        //   "success": true,
+        //   "prediction_type": "week",
+        //   "predictions": [
+        //     { "date": "2024-01-01", "units_sold": 100.0 },
+        //     ...
+        //   ]
+        // }
+
+        if (!data.success) {
+          throw new Error(data.message || "Prediction failed.");
+        }
+
+        predictStatus.textContent = data.message || "Prediction complete.";
+        predictStatus.classList.remove("info");
+        predictStatus.classList.add("success");
+
+        // Build results table
+        let html = "<h3>Prediction Results</h3>";
+
+        if (data.prediction_type === "week" && Array.isArray(data.predictions)) {
+          html += '<table class="results-table">';
+          html += "<thead><tr><th>Date</th><th>Predicted Units Sold</th></tr></thead><tbody>";
+
+          data.predictions.forEach((row) => {
+            html += `<tr>
+              <td>${row.date}</td>
+              <td>${row.units_sold.toFixed ? row.units_sold.toFixed(2) : row.units_sold}</td>
+            </tr>`;
+          });
+
+          html += "</tbody></table>";
+        } else {
+          // Assume single-day prediction
+          const dateStr = data.date || date;
+          const units = data.units_sold;
+          html += `<p><strong>Date:</strong> ${dateStr}</p>`;
+          html += `<p><strong>Predicted Units Sold:</strong> ${
+            units && units.toFixed ? units.toFixed(2) : units
+          }</p>`;
+        }
+
+        predictionWrapper.innerHTML = html;
+        showElement(predictionWrapper);
+      } catch (err) {
+        console.error(err);
+        predictStatus.textContent = "Error during prediction: " + err.message;
+        predictStatus.classList.remove("info");
+        predictStatus.classList.remove("success");
+        predictStatus.classList.add("error");
+      }
+    });
+  </script>
+</body>
+</html>

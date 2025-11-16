@@ -6,8 +6,20 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+import matplotlib.pyplot as plt
+import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
+
+# Set plotting style
+try:
+    plt.style.use('seaborn-v0_8-darkgrid')
+except:
+    try:
+        plt.style.use('seaborn-darkgrid')
+    except:
+        plt.style.use('default')
+sns.set_palette("husl")
 
 
 # ============================================================
@@ -400,4 +412,176 @@ for model_name, rmse_val in sorted_models:
 print("\n" + "="*70)
 print("COMPARISON COMPLETE")
 print("="*70)
+
+
+# ============================================================
+# VISUALIZATION: MODEL ACCURACY PLOTS
+# ============================================================
+
+print("\n" + "="*70)
+print("GENERATING ACCURACY PLOTS")
+print("="*70)
+
+# Prepare data for plotting
+model_names = list(results_comparison.keys())
+rmse_values = list(results_comparison.values())
+train_rmse_values = [
+    baseline_train_rmse.mean(),
+    train_rmse_scores.mean(),
+    dt_train_rmse.mean()
+]
+test_rmse_values = [
+    baseline_rmse.mean(),
+    linear_rmse,
+    dt_rmse.mean()
+]
+
+# Calculate improvements
+baseline_rmse_val = baseline_rmse.mean()
+improvements = [
+    0,  # Baseline has no improvement over itself
+    ((baseline_rmse_val - linear_rmse) / baseline_rmse_val) * 100,
+    ((baseline_rmse_val - dt_rmse.mean()) / baseline_rmse_val) * 100
+]
+
+# Create figure with subplots
+fig = plt.figure(figsize=(16, 12))
+
+# Plot 1: RMSE Comparison Bar Chart
+ax1 = plt.subplot(2, 3, 1)
+bars = ax1.bar(range(len(model_names)), rmse_values, color=['#FF6B6B', '#4ECDC4', '#45B7D1'])
+ax1.set_xlabel('Model', fontsize=11, fontweight='bold')
+ax1.set_ylabel('RMSE', fontsize=11, fontweight='bold')
+ax1.set_title('Test RMSE Comparison Across Models', fontsize=12, fontweight='bold')
+ax1.set_xticks(range(len(model_names)))
+ax1.set_xticklabels([name.replace(' (', '\n(') for name in model_names], rotation=0, ha='center', fontsize=9)
+ax1.grid(axis='y', alpha=0.3)
+
+# Add value labels on bars
+for i, (bar, val) in enumerate(zip(bars, rmse_values)):
+    height = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2., height,
+             f'{val:.2f}',
+             ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+# Plot 2: Train vs Test RMSE
+ax2 = plt.subplot(2, 3, 2)
+x = np.arange(len(model_names))
+width = 0.35
+bars1 = ax2.bar(x - width/2, train_rmse_values, width, label='Train RMSE', color='#95E1D3', alpha=0.8)
+bars2 = ax2.bar(x + width/2, test_rmse_values, width, label='Test RMSE', color='#F38181', alpha=0.8)
+ax2.set_xlabel('Model', fontsize=11, fontweight='bold')
+ax2.set_ylabel('RMSE', fontsize=11, fontweight='bold')
+ax2.set_title('Train vs Test RMSE (Overfitting Analysis)', fontsize=12, fontweight='bold')
+ax2.set_xticks(x)
+ax2.set_xticklabels([name.replace(' (', '\n(') for name in model_names], rotation=0, ha='center', fontsize=9)
+ax2.legend(fontsize=9)
+ax2.grid(axis='y', alpha=0.3)
+
+# Add value labels
+for bars in [bars1, bars2]:
+    for bar in bars:
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}',
+                ha='center', va='bottom', fontsize=8)
+
+# Plot 3: Improvement Percentage
+ax3 = plt.subplot(2, 3, 3)
+colors_improve = ['gray' if imp == 0 else '#4ECDC4' if imp > 0 else '#FF6B6B' for imp in improvements]
+bars = ax3.bar(range(len(model_names)), improvements, color=colors_improve, alpha=0.8)
+ax3.set_xlabel('Model', fontsize=11, fontweight='bold')
+ax3.set_ylabel('Improvement (%)', fontsize=11, fontweight='bold')
+ax3.set_title('Improvement Over Baseline (%)', fontsize=12, fontweight='bold')
+ax3.set_xticks(range(len(model_names)))
+ax3.set_xticklabels([name.replace(' (', '\n(') for name in model_names], rotation=0, ha='center', fontsize=9)
+ax3.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
+ax3.grid(axis='y', alpha=0.3)
+
+# Add value labels
+for i, (bar, val) in enumerate(zip(bars, improvements)):
+    height = bar.get_height()
+    if val != 0:
+        ax3.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.1f}%',
+                ha='center', va='bottom' if val > 0 else 'top', fontsize=10, fontweight='bold')
+
+# Plot 4: Cross-Validation Fold Results
+ax4 = plt.subplot(2, 3, 4)
+fold_data = {
+    'Baseline': baseline_rmse,
+    'Linear (Lag/Rolling)': rmse_scores,
+    'Decision Tree': dt_rmse
+}
+fold_df = pd.DataFrame(fold_data)
+fold_df_melted = fold_df.melt(var_name='Model', value_name='RMSE')
+sns.boxplot(data=fold_df_melted, x='Model', y='RMSE', ax=ax4, palette=['#FF6B6B', '#4ECDC4', '#45B7D1'])
+ax4.set_xlabel('Model', fontsize=11, fontweight='bold')
+ax4.set_ylabel('RMSE', fontsize=11, fontweight='bold')
+ax4.set_title('RMSE Distribution Across CV Folds', fontsize=12, fontweight='bold')
+ax4.tick_params(axis='x', rotation=15)
+ax4.grid(axis='y', alpha=0.3)
+
+# Plot 5: Overfitting Gap (Train - Test)
+ax5 = plt.subplot(2, 3, 5)
+overfitting_gaps = [train - test for train, test in zip(train_rmse_values, test_rmse_values)]
+gap_pct = [(gap / test) * 100 for gap, test in zip(overfitting_gaps, test_rmse_values)]
+colors_gap = ['#FF6B6B' if gap < 0 else '#4ECDC4' for gap in overfitting_gaps]
+bars = ax5.bar(range(len(model_names)), gap_pct, color=colors_gap, alpha=0.8)
+ax5.set_xlabel('Model', fontsize=11, fontweight='bold')
+ax5.set_ylabel('Overfitting Gap (%)', fontsize=11, fontweight='bold')
+ax5.set_title('Overfitting Analysis (Train-Test Gap %)', fontsize=12, fontweight='bold')
+ax5.set_xticks(range(len(model_names)))
+ax5.set_xticklabels([name.replace(' (', '\n(') for name in model_names], rotation=0, ha='center', fontsize=9)
+ax5.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
+ax5.grid(axis='y', alpha=0.3)
+
+# Add value labels
+for i, (bar, val) in enumerate(zip(bars, gap_pct)):
+    height = bar.get_height()
+    ax5.text(bar.get_x() + bar.get_width()/2., height,
+            f'{val:.1f}%',
+            ha='center', va='bottom' if val > 0 else 'top', fontsize=10, fontweight='bold')
+
+# Plot 6: Model Ranking Visualization
+ax6 = plt.subplot(2, 3, 6)
+sorted_models_plot = sorted(results_comparison.items(), key=lambda x: x[1])
+sorted_names = [name for name, _ in sorted_models_plot]
+sorted_rmse = [rmse for _, rmse in sorted_models_plot]
+colors_rank = ['#FFD93D', '#6BCB77', '#4D96FF'][:len(sorted_names)]
+bars = ax6.barh(range(len(sorted_names)), sorted_rmse, color=colors_rank, alpha=0.8)
+ax6.set_xlabel('RMSE', fontsize=11, fontweight='bold')
+ax6.set_ylabel('Model (Ranked)', fontsize=11, fontweight='bold')
+ax6.set_title('Model Ranking (Best to Worst)', fontsize=12, fontweight='bold')
+ax6.set_yticks(range(len(sorted_names)))
+ax6.set_yticklabels([name.replace(' (', '\n(') for name in sorted_names], fontsize=9)
+ax6.grid(axis='x', alpha=0.3)
+
+# Add value labels
+for i, (bar, val) in enumerate(zip(bars, sorted_rmse)):
+    width = bar.get_width()
+    ax6.text(width, bar.get_y() + bar.get_height()/2.,
+            f'  {val:.2f}',
+            ha='left', va='center', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+
+# Save the plot
+plt.savefig('model_accuracy_comparison.png', dpi=300, bbox_inches='tight')
+print("\nPlot saved as 'model_accuracy_comparison.png'")
+
+# Show the plot
+plt.show()
+
+print("\n" + "="*70)
+print("VISUALIZATION COMPLETE")
+print("="*70)
+print("\nGenerated 6 visualization plots:")
+print("  1. Test RMSE Comparison - Bar chart showing RMSE for each model")
+print("  2. Train vs Test RMSE - Side-by-side comparison showing overfitting")
+print("  3. Improvement Over Baseline - Percentage improvement for each model")
+print("  4. CV Fold Distribution - Box plot showing RMSE variability across folds")
+print("  5. Overfitting Analysis - Train-Test gap percentage for each model")
+print("  6. Model Ranking - Horizontal bar chart ranking models best to worst")
+print("\nAll plots saved in: model_accuracy_comparison.png")
 

@@ -457,3 +457,88 @@ def predict_sales(store_id, product_id, date_or_week, is_week=False):
         return predict_sales_for_week(store_id, product_id, date_or_week, model, historical_data)
     else:
         return predict_sales_for_date(store_id, product_id, date_or_week, model, historical_data)
+    
+
+def predict_and_recommend(
+    store_id,
+    product_id,
+    date_str,
+    existing_stock,
+    is_week=False,
+    safety_stock=0,
+    incoming_stock=0
+):
+    """
+    All-in-one function:
+      - Makes a prediction (daily or weekly)
+      - Computes recommended order quantity
+
+    Parameters
+    ----------
+    store_id : str
+    product_id : str
+    date_str : str ("YYYY-MM-DD")
+    existing_stock : float
+        Current inventory on hand
+    is_week : bool (default False)
+        If True → returns 7-day predictions + weekly order quantity
+        If False → returns single-day prediction + daily order quantity
+    safety_stock : float
+        Optional buffer to avoid stockouts
+    incoming_stock : float
+        Stock already ordered but not yet received
+
+    Returns
+    -------
+    dict
+        {
+          "prediction_type": "day" or "week",
+          "predictions": {date: units_predicted}  (for week)
+            OR
+          "units_predicted": float (for day),
+          "recommended_order_qty": float
+        }
+    """
+
+    # Load model + historical data
+    model, historical_data = load_model_and_data()
+
+    # ---------------------------
+    # WEEKLY PREDICTION CASE
+    # ---------------------------
+    if is_week:
+        week_pred = predict_sales_for_week(store_id, product_id, date_str, model, historical_data)
+
+        total_predicted_demand = sum(week_pred.values())
+        inventory_position = existing_stock + incoming_stock
+
+        order_qty = max(total_predicted_demand + safety_stock - inventory_position, 0.0)
+
+        return {
+            "success": True,
+            "prediction_type": "week",
+            "store_id": store_id,
+            "product_id": product_id,
+            "predictions": week_pred,             # dict of 7 days
+            "total_predicted_demand": total_predicted_demand,
+            "recommended_order_qty": order_qty,
+        }
+
+    # ---------------------------
+    # SINGLE-DAY PREDICTION CASE
+    # ---------------------------
+    else:
+        pred = predict_sales_for_date(store_id, product_id, date_str, model, historical_data)
+
+        inventory_position = existing_stock + incoming_stock
+        order_qty = max(pred + safety_stock - inventory_position, 0.0)
+
+        return {
+            "success": True,
+            "prediction_type": "day",
+            "store_id": store_id,
+            "product_id": product_id,
+            "date": date_str,
+            "units_predicted": pred,
+            "recommended_order_qty": order_qty,
+        }

@@ -457,6 +457,3 @@ def predict_sales(store_id, product_id, date_or_week, is_week=False):
         return predict_sales_for_week(store_id, product_id, date_or_week, model, historical_data)
     else:
         return predict_sales_for_date(store_id, product_id, date_or_week, model, historical_data)
-    
-
-print(predict_sales("S005", "P0020", "2024-01-30", True))

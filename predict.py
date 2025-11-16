@@ -11,6 +11,9 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 
+import matplotlib
+matplotlib.use("Agg")  
+
 import matplotlib.pyplot as plt
 import warnings
 

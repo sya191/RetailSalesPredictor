@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import TimeSeriesSplit, cross_validate
 from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -41,6 +42,14 @@ data["Year"] = data["Date"].dt.year
 
 # Days since start
 data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
+
+
+# ============================================================
+# SAVE BASELINE DATA (before lag/rolling features)
+# ============================================================
+
+# Create a copy of data before adding lag/rolling features for baseline model
+data_baseline = data.copy()
 
 
 # ============================================================
@@ -120,7 +129,61 @@ print(f"  Max: {y.max()}")
 
 
 # ============================================================
-# PREPROCESSING PIPELINE
+# BASELINE LINEAR REGRESSION (NO LAG/ROLLING FEATURES)
+# ============================================================
+
+print("\n" + "="*70)
+print("BASELINE LINEAR REGRESSION (NO LAG/ROLLING FEATURES)")
+print("="*70)
+
+# Prepare baseline data
+y_baseline = data_baseline["Units Sold"]
+X_baseline = data_baseline.drop(columns=["Units Sold", "Date"])
+
+# Identify categorical and numeric columns for baseline
+categorical_cols_baseline = X_baseline.select_dtypes(include=['object']).columns.tolist()
+numeric_cols_baseline = X_baseline.select_dtypes(include=[np.number]).columns.tolist()
+
+print(f"\nBaseline data shape: {data_baseline.shape}")
+print(f"Baseline features: {len(numeric_cols_baseline)} numeric, {len(categorical_cols_baseline)} categorical")
+
+# Preprocessor for baseline
+preprocessor_baseline = ColumnTransformer(
+    transformers=[
+        ("cat", OneHotEncoder(drop='first', handle_unknown='ignore', sparse_output=False), categorical_cols_baseline),
+        ("num", StandardScaler(), numeric_cols_baseline)
+    ],
+    remainder='drop'
+)
+
+# Baseline model
+linear_model_baseline = LinearRegression()
+pipeline_baseline = Pipeline(steps=[
+    ("preprocessor", preprocessor_baseline),
+    ("model", linear_model_baseline)
+])
+
+# Time series cross-validation for baseline
+cross_val = TimeSeriesSplit(n_splits=3)
+
+print("\nTraining baseline linear regression...")
+results_baseline = cross_validate(
+    pipeline_baseline, X_baseline, y_baseline,
+    cv=cross_val,
+    scoring="neg_root_mean_squared_error",
+    return_estimator=True,
+    return_train_score=True
+)
+
+baseline_rmse = -results_baseline["test_score"]
+baseline_train_rmse = -results_baseline["train_score"]
+
+print(f"Train RMSE: {baseline_train_rmse.mean():.4f} (folds: {baseline_train_rmse})")
+print(f"Test RMSE: {baseline_rmse.mean():.4f} (folds: {baseline_rmse})")
+
+
+# ============================================================
+# PREPROCESSING PIPELINE (for models with lag/rolling)
 # ============================================================
 
 # One-hot encode categoricals, standardize numerics
@@ -134,7 +197,7 @@ preprocessor = ColumnTransformer(
 
 
 # ============================================================
-# BASELINE LINEAR REGRESSION MODEL
+# LINEAR REGRESSION WITH LAG & ROLLING FEATURES
 # ============================================================
 
 print("\n" + "="*70)
@@ -236,7 +299,105 @@ except Exception as e:
     print(f"\nCould not extract feature names: {e}")
 
 print("\n" + "="*70)
-print("BASELINE MODEL COMPLETE")
+print("LINEAR REGRESSION RESULTS")
 print("="*70)
 print(f"Final Test RMSE: {rmse_scores.mean():.4f}")
+linear_rmse = rmse_scores.mean()
+
+
+# ============================================================
+# DECISION TREE MODEL
+# ============================================================
+
+print("\n" + "="*70)
+print("DECISION TREE REGRESSOR")
+print("="*70)
+
+dt_model = DecisionTreeRegressor(
+    max_depth=15,
+    min_samples_split=20,
+    min_samples_leaf=10,
+    random_state=42
+)
+
+dt_pipeline = Pipeline(steps=[
+    ("preprocessor", preprocessor),
+    ("model", dt_model)
+])
+
+print("Training Decision Tree...")
+dt_results = cross_validate(
+    dt_pipeline, X, y,
+    cv=cross_val,
+    scoring="neg_root_mean_squared_error",
+    return_estimator=True,
+    return_train_score=True
+)
+
+dt_rmse = -dt_results["test_score"]
+dt_train_rmse = -dt_results["train_score"]
+
+print(f"\nTrain RMSE: {dt_train_rmse.mean():.4f} (folds: {dt_train_rmse})")
+print(f"Test RMSE: {dt_rmse.mean():.4f} (folds: {dt_rmse})")
+
+
+# ============================================================
+# MODEL COMPARISON
+# ============================================================
+
+print("\n" + "="*70)
+print("MODEL COMPARISON")
+print("="*70)
+
+results_comparison = {
+    "Linear Regression (Baseline)": baseline_rmse.mean(),
+    "Linear Regression (with Lag/Rolling)": linear_rmse,
+    "Decision Tree (with Lag/Rolling)": dt_rmse.mean()
+}
+
+sorted_models = sorted(results_comparison.items(), key=lambda x: x[1])
+
+print("\nRanking (best to worst RMSE):")
+print("-" * 70)
+for i, (model_name, rmse_val) in enumerate(sorted_models, 1):
+    improvement = linear_rmse - rmse_val
+    marker = "***" if i == 1 else "   "
+    print(f"{marker} {i}. {model_name:30s} RMSE: {rmse_val:.4f}  (improvement: {improvement:+.4f})")
+
+best_model_name = sorted_models[0][0]
+best_rmse = sorted_models[0][1]
+
+print("\n" + "="*70)
+print(f"*** BEST MODEL: {best_model_name} with RMSE = {best_rmse:.4f} ***")
+print("="*70)
+
+# Calculate improvement percentage
+improvement_pct = ((linear_rmse - best_rmse) / linear_rmse) * 100
+print(f"\nImprovement over Linear Regression: {improvement_pct:.2f}%")
+
+# Show overfitting analysis
+print("\nOverfitting Analysis (Train vs Test RMSE):")
+print("-" * 70)
+for model_name, train_rmse_val, test_rmse_val in [
+    ("Linear Regression (Baseline)", baseline_train_rmse.mean(), baseline_rmse.mean()),
+    ("Linear Regression (Lag/Rolling)", train_rmse_scores.mean(), linear_rmse),
+    ("Decision Tree (Lag/Rolling)", dt_train_rmse.mean(), dt_rmse.mean())
+]:
+    gap = train_rmse_val - test_rmse_val
+    gap_pct = (gap / test_rmse_val) * 100 if test_rmse_val > 0 else 0
+    print(f"{model_name:40s} Train: {train_rmse_val:.4f}  Test: {test_rmse_val:.4f}  Gap: {gap:+.4f} ({gap_pct:+.1f}%)")
+
+# Show improvement over baseline
+print("\nImprovement over Baseline Linear Regression:")
+print("-" * 70)
+baseline_rmse_val = baseline_rmse.mean()
+for model_name, rmse_val in sorted_models:
+    if model_name != "Linear Regression (Baseline)":
+        improvement = baseline_rmse_val - rmse_val
+        improvement_pct = (improvement / baseline_rmse_val) * 100
+        print(f"{model_name:40s} Improvement: {improvement:+.4f} ({improvement_pct:+.2f}%)")
+
+print("\n" + "="*70)
+print("COMPARISON COMPLETE")
+print("="*70)
 

@@ -19,14 +19,8 @@ warnings.filterwarnings("ignore")
 
 def _load_and_engineer_features(csv_path: str = "sales_data.csv"):
     """
-    Load the raw CSV and create two feature sets:
-
-    * baseline_data: no lag/rolling features, just original columns + date parts
-    * full_data: includes lag and rolling statistics
-
-    Returns
-    -------
-    (baseline_data, full_data, log_text)
+    Load the raw CSV and create two feature sets
+    Returns :baseline_data, full_data, log_text
     """
     log_lines = []
 
@@ -121,25 +115,9 @@ def train_and_evaluate_models(
     csv_path: str = "sales_data.csv",
     plot_path="static/model_accuracy_comparison.png",
 ) -> Dict[str, Any]:
-    """
-    Train baseline and feature-rich models and return evaluation metrics.
-
-    Designed for use from a /train endpoint. It does *not* save the model
-    used by the prediction API – that is handled by
-    predict_sales.train_and_save_model.
-
-    Returns
-    -------
-    dict
-        {
-          "model_name": best model by test RMSE,
-          "train_rmse": train RMSE of best model,
-          "test_rmse": test RMSE of best model,
-          "metrics": { model_name -> mean test RMSE },
-          "log": multi-line training summary,
-          "plot_path": path to saved PNG
-        }
-    """
+    
+    # training several base line models returns their rmse score 
+    # returns the best model’s metrics along with a training log and saved accuracy plot.
     base_data, full_data, prep_log = _load_and_engineer_features(csv_path)
 
     logs = [prep_log]

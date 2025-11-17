@@ -8,32 +8,11 @@ import pickle
 import warnings
 warnings.filterwarnings('ignore')
 
-
-# ============================================================
-# TRAINING FUNCTION (for endpoints and scripts)
-# ============================================================
-
+# Training functions for endpoints and scripts
 def train_and_save_model(csv_path="sales_data.csv"):
-    """
-    Train the Decision Tree model on all available data and save artifacts.
-
-    This function mirrors the original module-level training code but
-    exposes it as a callable function so that a web backend (e.g. app.py)
-    can trigger re-training on demand.
-
-    Parameters
-    ----------
-    csv_path : str, default "sales_data.csv"
-        Path to the CSV file containing the raw sales data.
-
-    Returns
-    -------
-    dict
-        A small summary with the number of rows and columns used for
-        training. The model itself is persisted to disk as
-        ``sales_prediction_model.pkl`` and the engineered historical
-        data as ``historical_data.pkl``.
-    """
+    # training hte decision tree on the full dataset and saving the results
+    # returns a small summary of the data used, the traied model and enginerred
+    # features will be saved to disk
     print("Loading and preparing data...")
     data = pd.read_csv(csv_path)
     
@@ -54,10 +33,7 @@ def train_and_save_model(csv_path="sales_data.csv"):
     data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
     
     
-    # ============================================================
-    # CREATE LAG + ROLLING FEATURES
-    # ============================================================
-    
+    # creating lag +rolling features
     print("Creating lag and rolling features...")
     
     # Lag features
@@ -106,11 +82,7 @@ def train_and_save_model(csv_path="sales_data.csv"):
     
     print(f"Data prepared: {data.shape[0]} rows, {data.shape[1]} columns")
     
-    
-    # ============================================================
-    # PREPARE FEATURES AND TARGET
-    # ============================================================
-    
+    #preparing the features and setting the target    
     y = data["Units Sold"]
     X = data.drop(columns=["Units Sold", "Date"])
     
@@ -120,10 +92,7 @@ def train_and_save_model(csv_path="sales_data.csv"):
     print(f"Features: {len(numeric_cols)} numeric, {len(categorical_cols)} categorical")
     
     
-    # ============================================================
-    # TRAIN MODEL ON ALL DATA
-    # ============================================================
-    
+    #train the model on all data     
     print("\nTraining Decision Tree model on all data...")
     
     # Preprocessor
@@ -165,33 +134,12 @@ def train_and_save_model(csv_path="sales_data.csv"):
     return {"rows": int(data.shape[0]), "cols": int(data.shape[1])}
 
 
-# ============================================================
-# PREDICTION FUNCTIONS (unchanged from your original)
-# ============================================================
+# Prediction functions
 
 def _get_last_known_values(store_id, product_id, historical_data):
-    """
-    Private helper function to get the last known values for a store-product combination.
-    
-    This function retrieves the most recent historical data point for a specific
-    store and product combination, which is used as a baseline for creating
-    features for future predictions.
-    
-    Parameters:
-    -----------
-    store_id : str
-        Store identifier (e.g., "S001", "S002")
-    product_id : str
-        Product identifier (e.g., "P0001", "P0002")
-    historical_data : pd.DataFrame
-        DataFrame containing historical sales data with columns including
-        "Store ID", "Product ID", "Date", "Units Sold", and engineered features.
-    
-    Returns:
-    --------
-    pd.Series
-        A row representing the last known data point for the given store and product.
-    """
+    # This is a helper function to get the last known values for a store-product combination.
+    # Used to provide baseline feature values when generating future predictions.
+    # Returns:pd.Series which is a row representing the last known data point for the given store and product.
     store_product_data = historical_data[
         (historical_data["Store ID"] == store_id) &
         (historical_data["Product ID"] == product_id)
@@ -205,33 +153,10 @@ def _get_last_known_values(store_id, product_id, historical_data):
 
 
 def _create_features_for_date(store_id, product_id, target_date, historical_data):
-    """
-    Private helper function to create a feature vector for a specific date.
-    
-    This function creates a feature row for prediction by taking the last known
-    data point for a store-product combination and rolling it forward to the
-    target date, updating date-related features, lag values, and rolling metrics.
-    
-    Parameters:
-    -----------
-    store_id : str
-        Store identifier (e.g., "S001", "S002")
-    product_id : str
-        Product identifier (e.g., "P0001", "P0002")
-    target_date : str or pd.Timestamp
-        Target date for prediction. Can be a string in format "YYYY-MM-DD"
-        or a pandas Timestamp object (e.g., "2023-01-15")
-    historical_data : pd.DataFrame
-        DataFrame containing historical sales data with engineered features.
-    
-    Returns:
-    --------
-    pd.DataFrame
-        A single-row DataFrame containing the feature vector for the target date.
-    """
+    # building a feature wor for a given future da
     if isinstance(target_date, str):
         target_date = pd.to_datetime(target_date)
-    
+    #rolling forward the last known store–product record.
     last_row = _get_last_known_values(store_id, product_id, historical_data)
     
     # Copy the last row and update date
@@ -285,52 +210,25 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
 
 
 def predict_sales_for_date(store_id, product_id, target_date, model, historical_data):
-    """
-    Predict sales for a specific store, product, and date.
-    
-    This function creates features for a single target date and uses the trained
-    model to predict the number of units that will be sold. The prediction is
-    based on historical patterns, lag features, and rolling statistics.
-    
-    Parameters:
-    -----------
-    store_id : str
-        Store identifier (e.g., "S001", "S002")
-    product_id : str
-        Product identifier (e.g., "P0001", "P0002")
-    target_date : str or pd.Timestamp
-        Target date for prediction. Can be a string in format "YYYY-MM-DD"
-        or a pandas Timestamp object (e.g., "2023-01-15")
-    model : sklearn.pipeline.Pipeline
-        Trained scikit-learn pipeline containing preprocessor and model
-    historical_data : pd.DataFrame
-        DataFrame containing historical sales data needed to create lag and
-        rolling features
-    
-    Returns:
-    --------
-    float
-        Predicted units sold for the specified date.
-    """
+   # Predict the number of units a store porduct will sell on a given date.
+   # Done by building required feature row and passing it through the train model
     feature_df = _create_features_for_date(store_id, product_id, target_date, historical_data)
     prediction = model.predict(feature_df)[0]
     return max(0.0, float(prediction))
 
 
 def predict_sales_for_week(store_id, product_id, week_start_date, model, historical_data):
-    """
-    Predict sales for a full week recursively.
-
-    Each day's prediction is appended back into the historical_data
-    so that lag features update properly for the next day.
-    """
+    
+    # Predict sales for a full week recursively.
+    # Where each day's prediction is appended back into the historical_data
+    # So that lag features update properly for the next day.
     if isinstance(week_start_date, str):
         week_start_date = pd.to_datetime(week_start_date)
 
-    # We must work on a COPY so we don't mutate original historical data
+    # creating a copy so we don't overwrite the historical data
     hist = historical_data.copy()
     
-    # Filter just the store+product to speed things up
+    # Filters the store+product to speed things up
     store_product_hist = hist[
         (hist["Store ID"] == store_id) &
         (hist["Product ID"] == product_id)
@@ -341,7 +239,7 @@ def predict_sales_for_week(store_id, product_id, week_start_date, model, histori
 
     predictions = {}
 
-    # Extract static features that don't change into the future (price, inventory, etc.)
+    # Extract static features that don't change in the future (price, inventory, etc.)
     last_known_price = float(store_product_hist["Price"].iloc[-1])
     last_known_inventory = float(store_product_hist["Inventory Level"].iloc[-1])
 
@@ -349,15 +247,15 @@ def predict_sales_for_week(store_id, product_id, week_start_date, model, histori
         current_date = week_start_date + pd.Timedelta(days=i)
         date_str = current_date.strftime("%Y-%m-%d")
 
-        # ---- 1. Create feature row for this day (recursive) ----
+        # Recursively create feature row for this day 
         feature_row = _create_features_for_date(store_id, product_id, current_date, hist)
 
-        # ---- 2. Predict ----
+        # prediction
         pred = model.predict(feature_row)[0]
         pred = max(0.0, float(pred))
         predictions[date_str] = pred
 
-        # ---- 3. Append this prediction into history ----
+        # Append prediction to history
         new_row = {
             "Store ID": store_id,
             "Product ID": product_id,
@@ -373,84 +271,19 @@ def predict_sales_for_week(store_id, product_id, week_start_date, model, histori
 
 
 def load_model_and_data():
-    """
-    Load the trained model and historical data from saved files.
-    
-    This function loads the pre-trained Decision Tree model and historical
-    data that were saved during model training. These files must exist in
-    the current directory:
-    - sales_prediction_model.pkl: The trained scikit-learn pipeline
-    - historical_data.pkl: The historical sales data DataFrame
-    
-    Returns:
-    --------
-    tuple
-        A tuple containing:
-        - model (sklearn.pipeline.Pipeline): The trained prediction pipeline
-        - historical_data (pd.DataFrame): Historical sales data
-    
-    Raises:
-    -------
-    FileNotFoundError
-        If either "sales_prediction_model.pkl" or "historical_data.pkl"
-        cannot be found in the current directory
-    
-    Notes:
-    ------
-    - This function should be called before making predictions if you're
-      using the advanced API (predict_sales_for_date or predict_sales_for_week)
-    - The simplified API (predict_sales) calls this function automatically
-    - Make sure you've run the training script first to generate these files
-    """
+    # Loads the train model and historical data from disk
     with open("sales_prediction_model.pkl", "rb") as f:
         model = pickle.load(f)
     historical_data = pd.read_pickle("historical_data.pkl")
+    #Returns the saved prediction pipeline and the historical DataFrame,
     return model, historical_data
 
 
 def predict_sales(store_id, product_id, date_or_week, is_week=False):
-    """
-    Main prediction function for front-end integration.
-    
-    This is the primary interface function for making sales predictions. It
-    automatically loads the trained model and historical data, then makes
-    predictions for either a single date or a full week.
-    
-    Parameters:
-    -----------
-    store_id : str
-        Store identifier (e.g., "S001", "S002")
-    product_id : str
-        Product identifier (e.g., "P0001", "P0002")
-    date_or_week : str or pd.Timestamp
-        Target date for single prediction, or week start date for weekly
-        prediction. Can be a string in format "YYYY-MM-DD" or a pandas
-        Timestamp object (e.g., "2023-01-15")
-    is_week : bool, default=False
-        If True, predicts sales for a full week (7 days) starting from
-        date_or_week. If False, predicts for a single date.
-    
-    Returns:
-    --------
-    float or dict
-        - If is_week=False: Returns a float representing predicted units sold
-          for the single date
-        - If is_week=True: Returns a dictionary with dates as keys (format:
-          "YYYY-MM-DD") and predicted units sold as values (floats)
-    
-    Raises:
-    -------
-    FileNotFoundError
-        If model or historical data files cannot be found
-    
-    Notes:
-    ------
-    - This function automatically loads the model and data, so it's the
-      simplest interface for front-end integration
-    - For better performance in production, consider loading the model once
-      and using predict_sales_for_date or predict_sales_for_week directly
-    - All predictions are non-negative (minimum value is 0)
-    """
+
+    #Main prediction function for front-end integration.
+    #Load the trained model and historical data from disk.  
+    #Returns the saved prediction pipeline and the historical DataFrame based on user input on weeks/days
     model, historical_data = load_model_and_data()
     
     if is_week:
@@ -468,44 +301,14 @@ def predict_and_recommend(
     safety_stock=0,
     incoming_stock=0
 ):
-    """
-    All-in-one function:
-      - Makes a prediction (daily or weekly)
-      - Computes recommended order quantity
-
-    Parameters
-    ----------
-    store_id : str
-    product_id : str
-    date_str : str ("YYYY-MM-DD")
-    existing_stock : float
-        Current inventory on hand
-    is_week : bool (default False)
-        If True → returns 7-day predictions + weekly order quantity
-        If False → returns single-day prediction + daily order quantity
-    safety_stock : float
-        Optional buffer to avoid stockouts
-    incoming_stock : float
-        Stock already ordered but not yet received
-
-    Returns
-    -------
-    dict
-        {
-          "prediction_type": "day" or "week",
-          "predictions": {date: units_predicted}  (for week)
-            OR
-          "units_predicted": float (for day),
-          "recommended_order_qty": float
-        }
-    """
-
+    # Make a daily or weekly sales prediction and compute the recommended order
+    # Quantity, factoring in existing, incoming, and safety stock
+    # Returns either a single-day prediction or a 7-day forecast along with the suggested order amount.
     # Load model + historical data
     model, historical_data = load_model_and_data()
 
-    # ---------------------------
-    # WEEKLY PREDICTION CASE
-    # ---------------------------
+
+    # weekly prediction 
     if is_week:
         week_pred = predict_sales_for_week(store_id, product_id, date_str, model, historical_data)
 
@@ -519,14 +322,12 @@ def predict_and_recommend(
             "prediction_type": "week",
             "store_id": store_id,
             "product_id": product_id,
-            "predictions": week_pred,             # dict of 7 days
+            "predictions": week_pred,
             "total_predicted_demand": total_predicted_demand,
             "recommended_order_qty": order_qty,
         }
 
-    # ---------------------------
-    # SINGLE-DAY PREDICTION CASE
-    # ---------------------------
+    # single day prediction
     else:
         pred = predict_sales_for_date(store_id, product_id, date_str, model, historical_data)
 

@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request, jsonify, send_from_directory
 
-from predict import train_and_evaluate_models
+from predict import train_and_evaluate_models, visualize_models_comparison_table
 from predict_sales import train_and_save_model, predict_sales
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -64,6 +64,10 @@ def train_endpoint():
         plot_path = os.path.join(app.static_folder, "model_accuracy_comparison.png")
         eval_result = train_and_evaluate_models(csv_path=csv_path, plot_path=plot_path)
 
+        # 3) Create comparison table visualization
+        table_plot_path = os.path.join(app.static_folder, "model_comparison_table.png")
+        visualize_models_comparison_table(csv_path=csv_path, plot_path=table_plot_path)
+
         logs = []
         if train_summary:
             rows = train_summary.get("rows")
@@ -87,6 +91,7 @@ def train_endpoint():
                 "metrics": eval_result.get("metrics"),
                 "log": "\n".join(logs).strip(),
                 "plot_url": "/static/model_accuracy_comparison.png",
+                "table_url": "/static/model_comparison_table.png",
             }
         )
 

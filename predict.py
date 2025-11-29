@@ -10,6 +10,7 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_squared_error, r2_score
 
 import matplotlib
 matplotlib.use("Agg")  
@@ -330,3 +331,288 @@ def train_and_evaluate_models(
         "log": full_log,
         "plot_path": plot_path,
     }
+
+
+def compare_models_table(
+    csv_path: str = "sales_data.csv",
+) -> pd.DataFrame:
+    """
+    Compare the three models (Linear Regression, Linear Regression + Lag, 
+    Decision Tree) using a table with RMSE, Accuracy (R²), and Accuracy ±1.
+    
+    This function trains all three models using time series cross-validation,
+    makes predictions on test sets, and calculates comprehensive metrics.
+    
+    Parameters
+    ----------
+    csv_path : str, default "sales_data.csv"
+        Path to the CSV file containing the raw sales data.
+    
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with columns:
+        - Model: Model name
+        - RMSE: Root Mean Squared Error (mean across CV folds)
+        - Accuracy (R²): R² score (mean across CV folds)
+        - Accuracy ±1: Percentage of predictions within ±1 unit (mean across CV folds)
+    
+    Examples
+    --------
+    >>> comparison_table = compare_models_table("sales_data.csv")
+    >>> print(comparison_table)
+    """
+    # Load and prepare data
+    base_data, full_data, _ = _load_and_engineer_features(csv_path)
+    
+    # Prepare baseline data
+    y_base = base_data["Units Sold"]
+    X_base = base_data.drop(columns=["Units Sold", "Date"])
+    
+    cat_base = X_base.select_dtypes(include=["object"]).columns.tolist()
+    num_base = X_base.select_dtypes(include=[np.number]).columns.tolist()
+    
+    preproc_base = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    drop="first", handle_unknown="ignore", sparse_output=False
+                ),
+                cat_base,
+            ),
+            ("num", StandardScaler(), num_base),
+        ],
+        remainder="drop",
+    )
+    
+    baseline_pipeline = Pipeline(
+        steps=[
+            ("preprocessor", preproc_base),
+            ("model", LinearRegression()),
+        ]
+    )
+    
+    # Prepare full data (with lags)
+    y = full_data["Units Sold"]
+    X = full_data.drop(columns=["Units Sold", "Date"])
+    
+    cat_cols = X.select_dtypes(include=["object"]).columns.tolist()
+    num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    
+    preproc_full = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    drop="first", handle_unknown="ignore", sparse_output=False
+                ),
+                cat_cols,
+            ),
+            ("num", StandardScaler(), num_cols),
+        ],
+        remainder="drop",
+    )
+    
+    lin_pipeline = Pipeline(
+        steps=[("preprocessor", preproc_full), ("model", LinearRegression())]
+    )
+    
+    dt_pipeline = Pipeline(
+        steps=[
+            ("preprocessor", preproc_full),
+            (
+                "model",
+                DecisionTreeRegressor(
+                    max_depth=15,
+                    min_samples_split=20,
+                    min_samples_leaf=10,
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+    
+    # Time series cross-validation
+    tscv = TimeSeriesSplit(n_splits=3)
+    
+    # Store metrics for each model
+    models = {
+        "Linear Regression": (baseline_pipeline, X_base, y_base),
+        "Linear Regression + Lag": (lin_pipeline, X, y),
+        "Decision Tree": (dt_pipeline, X, y),
+    }
+    
+    results = []
+    
+    for model_name, (pipeline, X_data, y_data) in models.items():
+        rmse_scores = []
+        r2_scores = []
+        accuracy_plus_minus_1_scores = []
+        
+        # Evaluate across CV folds
+        for train_idx, test_idx in tscv.split(X_data):
+            X_train, X_test = X_data.iloc[train_idx], X_data.iloc[test_idx]
+            y_train, y_test = y_data.iloc[train_idx], y_data.iloc[test_idx]
+            
+            # Train model
+            pipeline.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = pipeline.predict(X_test)
+            
+            # Calculate RMSE
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            rmse_scores.append(rmse)
+            
+            # Calculate R² (accuracy)
+            r2 = r2_score(y_test, y_pred)
+            r2_scores.append(r2)
+            
+            # Calculate accuracy ±1 (percentage within ±1 unit)
+            within_1 = np.abs(y_test - y_pred) <= 1.0
+            accuracy_pm1 = np.mean(within_1) * 100
+            accuracy_plus_minus_1_scores.append(accuracy_pm1)
+        
+        # Average across folds
+        results.append({
+            "Model": model_name,
+            "RMSE": np.mean(rmse_scores),
+            "Accuracy (R²)": np.mean(r2_scores),
+            "Accuracy ±1": np.mean(accuracy_plus_minus_1_scores),
+        })
+    
+    # Create DataFrame
+    comparison_df = pd.DataFrame(results)
+    
+    return comparison_df
+
+
+def compare_models_table_formatted(
+    csv_path: str = "sales_data.csv",
+) -> str:
+    """
+    Compare the three models and return a formatted string table.
+    
+    This is a convenience function that calls compare_models_table() and
+    formats the result as a readable string table.
+    
+    Parameters
+    ----------
+    csv_path : str, default "sales_data.csv"
+        Path to the CSV file containing the raw sales data.
+    
+    Returns
+    -------
+    str
+        A formatted string table showing model comparison metrics.
+    
+    Examples
+    --------
+    >>> table_str = compare_models_table_formatted("sales_data.csv")
+    >>> print(table_str)
+    """
+    df = compare_models_table(csv_path)
+    
+    # Format the DataFrame as a string table
+    formatted = df.to_string(index=False, float_format=lambda x: f"{x:.4f}")
+    
+    return formatted
+
+
+def visualize_models_comparison_table(
+    csv_path: str = "sales_data.csv",
+    plot_path: str = "static/model_comparison_table.png",
+) -> str:
+    """
+    Create a visualized table comparing the three models and save it as a PNG.
+    
+    This function generates a matplotlib table visualization showing RMSE,
+    Accuracy (R²), and Accuracy ±1 for all three models.
+    
+    Parameters
+    ----------
+    csv_path : str, default "sales_data.csv"
+        Path to the CSV file containing the raw sales data.
+    plot_path : str, default "static/model_comparison_table.png"
+        Path where the PNG image will be saved.
+    
+    Returns
+    -------
+    str
+        The path where the image was saved.
+    
+    Examples
+    --------
+    >>> path = visualize_models_comparison_table("sales_data.csv", "static/table.png")
+    >>> print(f"Table saved to {path}")
+    """
+    # Get the comparison DataFrame
+    df = compare_models_table(csv_path)
+    
+    # Create directory if it doesn't exist
+    plot_dir = os.path.dirname(plot_path)
+    if plot_dir and not os.path.exists(plot_dir):
+        os.makedirs(plot_dir, exist_ok=True)
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Prepare data for table
+    # Format numeric values for display
+    table_data = []
+    for _, row in df.iterrows():
+        table_data.append([
+            row['Model'],
+            f"{row['RMSE']:.4f}",
+            f"{row['Accuracy (R²)']:.4f}",
+            f"{row['Accuracy ±1']:.2f}%"
+        ])
+    
+    # Create table
+    table = ax.table(
+        cellText=table_data,
+        colLabels=['Model', 'RMSE', 'Accuracy (R²)', 'Accuracy ±1'],
+        cellLoc='center',
+        loc='center',
+        bbox=[0, 0, 1, 1]
+    )
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(11)
+    table.scale(1, 2.5)
+    
+    # Style header row
+    for i in range(len(df.columns)):
+        cell = table[(0, i)]
+        cell.set_facecolor('#2196F3')
+        cell.set_text_props(weight='bold', color='white')
+        cell.set_height(0.15)
+    
+    # Style data rows - alternate colors
+    for i in range(len(df)):
+        for j in range(len(df.columns)):
+            cell = table[(i + 1, j)]
+            if i % 2 == 0:
+                cell.set_facecolor('#F5F5F5')
+            else:
+                cell.set_facecolor('#FFFFFF')
+            cell.set_height(0.12)
+    
+    # Style first column (Model names)
+    for i in range(len(df)):
+        cell = table[(i + 1, 0)]
+        cell.set_text_props(weight='bold')
+    
+    # Add title
+    fig.suptitle('Model Comparison Table', fontsize=16, fontweight='bold', y=0.95)
+    
+    # Save figure
+    fig.tight_layout()
+    fig.savefig(plot_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    
+    return plot_path

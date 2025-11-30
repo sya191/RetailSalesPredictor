@@ -20,6 +20,66 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# Add holiday feature
+def _is_holiday(date):
+    """Check if a date is a common holiday"""
+    month = date.month
+    day = date.day
+    year = date.year
+    
+    # Fixed date holidays
+    holidays = [
+        (1, 1),   # New Year's Day
+        (7, 4),   # Independence Day
+        (12, 25), # Christmas
+        (12, 31), # New Year's Eve
+    ]
+    
+    if (month, day) in holidays:
+        return 1
+    
+    # Thanksgiving (4th Thursday of November)
+    if month == 11:
+        first_day = pd.Timestamp(year, 11, 1).dayofweek
+        days_until_thursday = (3 - first_day) % 7
+        if days_until_thursday == 0:
+            days_until_thursday = 7
+        thanksgiving = 1 + days_until_thursday + 21
+        if day == thanksgiving:
+            return 1
+    
+    # Black Friday (day after Thanksgiving)
+    if month == 11:
+        first_day = pd.Timestamp(year, 11, 1).dayofweek
+        days_until_thursday = (3 - first_day) % 7
+        if days_until_thursday == 0:
+            days_until_thursday = 7
+        thanksgiving = 1 + days_until_thursday + 21
+        if day == thanksgiving + 1:
+            return 1
+    
+    # Memorial Day (last Monday of May)
+    if month == 5:
+        last_day = pd.Timestamp(year, 5, 31).dayofweek
+        days_back = (last_day - 0) % 7
+        memorial_day = 31 - days_back
+        if day == memorial_day:
+            return 1
+    
+    # Labor Day (first Monday of September)
+    if month == 9 and day <= 7:
+        first_day = pd.Timestamp(year, 9, 1).dayofweek
+        if first_day == 0:
+            return 1 if day == 1 else 0
+        days_until_monday = (7 - first_day) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7
+        labor_day = 1 + days_until_monday - 1
+        if day == labor_day:
+            return 1
+    
+    return 0
+
 
 def _load_and_engineer_features(csv_path: str = "sales_data.csv"):
     """
@@ -46,6 +106,25 @@ def _load_and_engineer_features(csv_path: str = "sales_data.csv"):
     data["Month"] = data["Date"].dt.month
     data["Year"] = data["Date"].dt.year
     data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
+    data["IsHoliday"] = data["Date"].apply(_is_holiday)
+    data["IsHoliday"] = data["IsHoliday"].astype("category")
+    data["IsWeekend"] = data["Date"].dt.dayofweek >= 5  # Saturday=5, Sunday=6
+    data["IsWeekend"] = data["IsWeekend"].astype("category")
+    
+    # Competitor Pricing Features
+    if "Competitor Pricing" in data.columns:
+        # Safely fill missing Competitor Pricings
+        data["Competitor Pricing"] = (
+            data["Competitor Pricing"]
+            .fillna(method="ffill")
+            .fillna(method="bfill")
+        )
+
+        # Price difference and ratio features
+        data["PriceDiff"] = data["Price"] - data["Competitor Pricing"]
+        data["PriceRatio"] = (
+            data["Price"] / data["Competitor Pricing"]
+        )
 
     # Baseline copy before lag/rolling
     baseline_data = data.copy()
@@ -130,7 +209,7 @@ def train_and_evaluate_models(
     y_base = base_data["Units Sold"]
     X_base = base_data.drop(columns=["Units Sold", "Date"])
 
-    cat_base = X_base.select_dtypes(include=["object"]).columns.tolist()
+    cat_base = X_base.select_dtypes(include=["object", "category"]).columns.tolist()
     num_base = X_base.select_dtypes(include=[np.number]).columns.tolist()
 
     preproc_base = ColumnTransformer(
@@ -171,7 +250,7 @@ def train_and_evaluate_models(
     y = full_data["Units Sold"]
     X = full_data.drop(columns=["Units Sold", "Date"])
 
-    cat_cols = X.select_dtypes(include=["object"]).columns.tolist()
+    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
 
     preproc_full = ColumnTransformer(

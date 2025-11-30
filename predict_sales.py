@@ -31,7 +31,24 @@ def train_and_save_model(csv_path="sales_data.csv"):
     data["Month"] = data["Date"].dt.month
     data["Year"] = data["Date"].dt.year
     data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
+    data["IsHoliday"] = data["Date"].apply(_is_holiday)
+    data["IsHoliday"] = data["IsHoliday"].astype("category")
+    data["IsWeekend"] = data["Date"].dt.dayofweek >= 5  # Saturday=5, Sunday=6
+    data["IsWeekend"] = data["IsWeekend"].astype("category")
     
+    # Competitor Pricing Features
+    if "Competitor Pricing" in data.columns:
+        # Fill missing competitor prices safely
+        data["Competitor Pricing"] = (
+            data["Competitor Pricing"]
+            .fillna(method="ffill")
+            .fillna(method="bfill")
+        )
+
+        # Price difference & price ratio
+        data["PriceDiff"] = data["Price"] - data["Competitor Pricing"]
+        data["PriceRatio"] = data["Price"] / data["Competitor Pricing"]
+        
     
     # creating lag +rolling features
     print("Creating lag and rolling features...")
@@ -86,7 +103,7 @@ def train_and_save_model(csv_path="sales_data.csv"):
     y = data["Units Sold"]
     X = data.drop(columns=["Units Sold", "Date"])
     
-    categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+    categorical_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
     numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     
     print(f"Features: {len(numeric_cols)} numeric, {len(categorical_cols)} categorical")
@@ -131,6 +148,8 @@ def train_and_save_model(csv_path="sales_data.csv"):
     data.to_pickle("historical_data.pkl")
     
     print("Model and historical data saved!")
+    print("Numeric:", numeric_cols)
+    print("Categorical:", categorical_cols)
     return {"rows": int(data.shape[0]), "cols": int(data.shape[1])}
 
 
@@ -151,6 +170,66 @@ def _get_last_known_values(store_id, product_id, historical_data):
     last_row = store_product_data.iloc[-1]
     return last_row
 
+# Add holiday feature
+def _is_holiday(date):
+    """Check if a date is a common holiday"""
+    month = date.month
+    day = date.day
+    year = date.year
+    
+    # Fixed date holidays
+    holidays = [
+        (1, 1),   # New Year's Day
+        (7, 4),   # Independence Day
+        (12, 25), # Christmas
+        (12, 31), # New Year's Eve
+    ]
+    
+    if (month, day) in holidays:
+        return 1
+    
+    # Thanksgiving (4th Thursday of November)
+    if month == 11:
+        first_day = pd.Timestamp(year, 11, 1).dayofweek
+        days_until_thursday = (3 - first_day) % 7
+        if days_until_thursday == 0:
+            days_until_thursday = 7
+        thanksgiving = 1 + days_until_thursday + 21
+        if day == thanksgiving:
+            return 1
+    
+    # Black Friday (day after Thanksgiving)
+    if month == 11:
+        first_day = pd.Timestamp(year, 11, 1).dayofweek
+        days_until_thursday = (3 - first_day) % 7
+        if days_until_thursday == 0:
+            days_until_thursday = 7
+        thanksgiving = 1 + days_until_thursday + 21
+        if day == thanksgiving + 1:
+            return 1
+    
+    # Memorial Day (last Monday of May)
+    if month == 5:
+        last_day = pd.Timestamp(year, 5, 31).dayofweek
+        days_back = (last_day - 0) % 7
+        memorial_day = 31 - days_back
+        if day == memorial_day:
+            return 1
+    
+    # Labor Day (first Monday of September)
+    if month == 9 and day <= 7:
+        first_day = pd.Timestamp(year, 9, 1).dayofweek
+        if first_day == 0:
+            return 1 if day == 1 else 0
+        days_until_monday = (7 - first_day) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7
+        labor_day = 1 + days_until_monday - 1
+        if day == labor_day:
+            return 1
+    
+    return 0
+
 
 def _create_features_for_date(store_id, product_id, target_date, historical_data):
     # building a feature wor for a given future da
@@ -168,6 +247,10 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
     feature_row["Month"] = target_date.month
     feature_row["Year"] = target_date.year
     feature_row["DaysSinceStart"] = (target_date - historical_data["Date"].min()).days
+    feature_row["IsHoliday"] = _is_holiday(target_date)
+    feature_row["IsHoliday"] = feature_row["IsHoliday"].astype("category")
+    feature_row["IsWeekend"] = feature_row["Date"].target_date.dayofweek >= 5  # Saturday=5, Sunday=6
+    feature_row["IsWeekend"] = feature_row["IsWeekend"].astype("category")
     
     # Update lag features by shifting from historical data
     store_product_data = historical_data[
@@ -196,6 +279,15 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
     # Update price rolling
     feature_row["Rolling_Price_7"] = np.mean(price_values[-7:])
     feature_row["PriceChange_7"] = feature_row["Price"] - feature_row["Rolling_Price_7"]
+    
+    # Competitor price features for future prediction
+    if "Competitor Pricing" in last_row.index:
+        feature_row["PriceDiff"] = feature_row["Price"] - feature_row["Competitor Pricing"]
+        feature_row["PriceRatio"] = (
+            feature_row["Price"] / feature_row["Competitor Pricing"]
+            if feature_row["Competitor Pricing"] != 0 else 1.0
+        )
+
     
     # Update inventory rolling
     feature_row["Rolling_Inventory_7"] = np.mean(inventory_values[-7:])

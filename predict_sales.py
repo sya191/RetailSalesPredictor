@@ -26,6 +26,9 @@ def train_and_save_model(csv_path="sales_data.csv"):
     # Sort by date for proper time series features
     data = data.sort_values(["Store ID", "Product ID", "Date"]).reset_index(drop=True)
     
+    # Convert epidemic to categorical feature
+    data["Epidemic"] = data["Epidemic"].astype("category")
+    
     # Extract date features
     data["DayOfWeek"] = data["Date"].dt.dayofweek
     data["Month"] = data["Date"].dt.month

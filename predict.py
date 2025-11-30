@@ -100,6 +100,9 @@ def _load_and_engineer_features(csv_path: str = "sales_data.csv"):
 
     data["Date"] = pd.to_datetime(data["Date"])
     data = data.sort_values(["Store ID", "Product ID", "Date"]).reset_index(drop=True)
+    
+    # Convert epidemic to categorical feature
+    data["Epidemic"] = data["Epidemic"].astype("category")
 
     # Date features
     data["DayOfWeek"] = data["Date"].dt.dayofweek

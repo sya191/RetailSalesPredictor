@@ -396,32 +396,7 @@ def train_and_evaluate_models(
 def compare_models_table(
     csv_path: str = "sales_data.csv",
 ) -> pd.DataFrame:
-    """
-    Compare the three models (Linear Regression, Linear Regression + Lag, 
-    Decision Tree) using a table with RMSE, Accuracy (R²), and Accuracy ±1.
     
-    This function trains all three models using time series cross-validation,
-    makes predictions on test sets, and calculates comprehensive metrics.
-    
-    Parameters
-    ----------
-    csv_path : str, default "sales_data.csv"
-        Path to the CSV file containing the raw sales data.
-    
-    Returns
-    -------
-    pd.DataFrame
-        A DataFrame with columns:
-        - Model: Model name
-        - RMSE: Root Mean Squared Error (mean across CV folds)
-        - Accuracy (R²): R² score (mean across CV folds)
-        - Accuracy ±1: Percentage of predictions within ±1 unit (mean across CV folds)
-    
-    Examples
-    --------
-    >>> comparison_table = compare_models_table("sales_data.csv")
-    >>> print(comparison_table)
-    """
     # Load and prepare data
     base_data, full_data, _ = _load_and_engineer_features(csv_path)
     
@@ -551,27 +526,6 @@ def compare_models_table(
 def compare_models_table_formatted(
     csv_path: str = "sales_data.csv",
 ) -> str:
-    """
-    Compare the three models and return a formatted string table.
-    
-    This is a convenience function that calls compare_models_table() and
-    formats the result as a readable string table.
-    
-    Parameters
-    ----------
-    csv_path : str, default "sales_data.csv"
-        Path to the CSV file containing the raw sales data.
-    
-    Returns
-    -------
-    str
-        A formatted string table showing model comparison metrics.
-    
-    Examples
-    --------
-    >>> table_str = compare_models_table_formatted("sales_data.csv")
-    >>> print(table_str)
-    """
     df = compare_models_table(csv_path)
     
     # Format the DataFrame as a string table
@@ -584,29 +538,6 @@ def visualize_models_comparison_table(
     csv_path: str = "sales_data.csv",
     plot_path: str = "static/model_comparison_table.png",
 ) -> str:
-    """
-    Create a visualized table comparing the three models and save it as a PNG.
-    
-    This function generates a matplotlib table visualization showing RMSE,
-    Accuracy (R²), and Accuracy ±1 for all three models.
-    
-    Parameters
-    ----------
-    csv_path : str, default "sales_data.csv"
-        Path to the CSV file containing the raw sales data.
-    plot_path : str, default "static/model_comparison_table.png"
-        Path where the PNG image will be saved.
-    
-    Returns
-    -------
-    str
-        The path where the image was saved.
-    
-    Examples
-    --------
-    >>> path = visualize_models_comparison_table("sales_data.csv", "static/table.png")
-    >>> print(f"Table saved to {path}")
-    """
     # Get the comparison DataFrame
     df = compare_models_table(csv_path)
     

@@ -35,9 +35,7 @@ def train_and_save_model(csv_path="sales_data.csv"):
     data["Year"] = data["Date"].dt.year
     data["DaysSinceStart"] = (data["Date"] - data["Date"].min()).dt.days
     data["IsHoliday"] = data["Date"].apply(_is_holiday)
-    data["IsHoliday"] = data["IsHoliday"].astype("category")
     data["IsWeekend"] = data["Date"].dt.dayofweek >= 5  # Saturday=5, Sunday=6
-    data["IsWeekend"] = data["IsWeekend"].astype("category")
     
     # Competitor Pricing Features
     if "Competitor Pricing" in data.columns:
@@ -211,14 +209,6 @@ def _is_holiday(date):
         if day == thanksgiving + 1:
             return 1
     
-    # Memorial Day (last Monday of May)
-    if month == 5:
-        last_day = pd.Timestamp(year, 5, 31).dayofweek
-        days_back = (last_day - 0) % 7
-        memorial_day = 31 - days_back
-        if day == memorial_day:
-            return 1
-    
     # Labor Day (first Monday of September)
     if month == 9 and day <= 7:
         first_day = pd.Timestamp(year, 9, 1).dayofweek
@@ -251,9 +241,7 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
     feature_row["Year"] = target_date.year
     feature_row["DaysSinceStart"] = (target_date - historical_data["Date"].min()).days
     feature_row["IsHoliday"] = _is_holiday(target_date)
-    feature_row["IsHoliday"] = feature_row["IsHoliday"].astype("category")
-    feature_row["IsWeekend"] = feature_row["Date"].target_date.dayofweek >= 5  # Saturday=5, Sunday=6
-    feature_row["IsWeekend"] = feature_row["IsWeekend"].astype("category")
+    feature_row["IsWeekend"] = target_date.dayofweek >= 5  # Saturday=5, Sunday=6
     
     # Update lag features by shifting from historical data
     store_product_data = historical_data[
@@ -305,11 +293,10 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
 
 
 def predict_sales_for_date(store_id, product_id, target_date, model, historical_data):
-   # Predict the number of units a store porduct will sell on a given date.
-   # Done by building required feature row and passing it through the train model
+    
     feature_df = _create_features_for_date(store_id, product_id, target_date, historical_data)
-    prediction = model.predict(feature_df)[0]
-    return max(0.0, float(prediction))
+    pred = model.predict(feature_df)[0]
+    return max(0.0, float(pred))
 
 
 def predict_sales_for_week(store_id, product_id, week_start_date, model, historical_data):

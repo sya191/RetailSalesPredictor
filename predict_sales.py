@@ -156,20 +156,6 @@ def train_and_save_model(csv_path="sales_data.csv"):
 
 # Prediction functions
 
-def _get_last_known_values(store_id, product_id, historical_data):
-    # This is a helper function to get the last known values for a store-product combination.
-    # Used to provide baseline feature values when generating future predictions.
-    # Returns:pd.Series which is a row representing the last known data point for the given store and product.
-    store_product_data = historical_data[
-        (historical_data["Store ID"] == store_id) &
-        (historical_data["Product ID"] == product_id)
-    ].sort_values("Date")
-    
-    if len(store_product_data) == 0:
-        raise ValueError(f"No historical data found for Store {store_id}, Product {product_id}")
-    
-    last_row = store_product_data.iloc[-1]
-    return last_row
 
 # Add holiday feature
 def _is_holiday(date):
@@ -225,72 +211,72 @@ def _is_holiday(date):
 
 
 def _create_features_for_date(store_id, product_id, target_date, historical_data):
-    # building a feature wor for a given future da
-    if isinstance(target_date, str):
-        target_date = pd.to_datetime(target_date)
-    #rolling forward the last known store–product record.
-    last_row = _get_last_known_values(store_id, product_id, historical_data)
-    
-    # Copy the last row and update date
-    feature_row = last_row.copy()
+    # Convert string date to datetime
+    target_date = pd.to_datetime(target_date)
+
+    # Filter historical rows for the specific store + product
+    sp = historical_data[
+        (historical_data["Store ID"] == store_id) &
+        (historical_data["Product ID"] == product_id)
+    ].sort_values("Date")
+
+    if sp.empty:
+        raise ValueError(f"No data for Store {store_id}, Product {product_id}")
+
+    # CASE A — Date exists in historical data -> return REAL feature row
+    real_row = sp[sp["Date"] == target_date]
+    if not real_row.empty:
+        return real_row.drop(columns=["Units Sold", "Date"]).reset_index(drop=True)
+
+    # CASE B — Future prediction -> build synthetic row from last known datapoint
+    last = sp.iloc[-1].copy()
+
+    feature_row = last.copy()
     feature_row["Date"] = target_date
-    
-    # Update date-based features
+
+    # Update date features
     feature_row["DayOfWeek"] = target_date.dayofweek
     feature_row["Month"] = target_date.month
     feature_row["Year"] = target_date.year
     feature_row["DaysSinceStart"] = (target_date - historical_data["Date"].min()).days
     feature_row["IsHoliday"] = _is_holiday(target_date)
-    feature_row["IsWeekend"] = target_date.dayofweek >= 5  # Saturday=5, Sunday=6
-    
-    # Update lag features by shifting from historical data
-    store_product_data = historical_data[
-        (historical_data["Store ID"] == store_id) &
-        (historical_data["Product ID"] == product_id)
-    ].sort_values("Date")
-    
-    # Compute new lag values
-    recent_sales = store_product_data["Units Sold"].values
-    feature_row["Lag_1"] = recent_sales[-1] if len(recent_sales) >= 1 else 0
-    feature_row["Lag_7"] = recent_sales[-7] if len(recent_sales) >= 7 else feature_row["Lag_1"]
-    feature_row["Lag_14"] = recent_sales[-14] if len(recent_sales) >= 14 else feature_row["Lag_7"]
-    feature_row["Lag_30"] = recent_sales[-30] if len(recent_sales) >= 30 else feature_row["Lag_14"]
-    
-    # Update rolling features using available historical data
-    rolling_values = recent_sales.tolist()
-    price_values = store_product_data["Price"].values.tolist()
-    inventory_values = store_product_data["Inventory Level"].values.tolist()
-    
-    # Update rolling statistics
-    for window in [7, 14, 30]:
-        window_vals = rolling_values[-window:] if len(rolling_values) >= window else rolling_values
-        feature_row[f"Rolling_{window}_mean"] = np.mean(window_vals) if len(window_vals) > 0 else 0
-        feature_row[f"Rolling_{window}_std"] = np.std(window_vals) if len(window_vals) > 1 else 0
-    
-    # Update price rolling
-    feature_row["Rolling_Price_7"] = np.mean(price_values[-7:])
+    feature_row["IsWeekend"] = target_date.dayofweek >= 5
+
+    # Build updated rolling history (sales, price, inventory)
+    sales_hist = sp["Units Sold"].tolist()
+    price_hist = sp["Price"].tolist()
+    inv_hist = sp["Inventory Level"].tolist()
+
+    # Lags
+    feature_row["Lag_1"] = sales_hist[-1]
+    feature_row["Lag_7"] = sales_hist[-7] if len(sales_hist) >= 7 else sales_hist[-1]
+    feature_row["Lag_14"] = sales_hist[-14] if len(sales_hist) >= 14 else feature_row["Lag_7"]
+    feature_row["Lag_30"] = sales_hist[-30] if len(sales_hist) >= 30 else feature_row["Lag_14"]
+
+    # Rolling windows
+    for w in [7, 14, 30]:
+        window_vals = sales_hist[-w:] if len(sales_hist) >= w else sales_hist
+        feature_row[f"Rolling_{w}_mean"] = float(np.mean(window_vals))
+        feature_row[f"Rolling_{w}_std"] = float(np.std(window_vals)) if len(window_vals) > 1 else 0.0
+
+    # Price rolling
+    feature_row["Rolling_Price_7"] = float(np.mean(price_hist[-7:]))
     feature_row["PriceChange_7"] = feature_row["Price"] - feature_row["Rolling_Price_7"]
-    
-    # Competitor price features for future prediction
-    if "Competitor Pricing" in last_row.index:
-        feature_row["PriceDiff"] = feature_row["Price"] - feature_row["Competitor Pricing"]
-        feature_row["PriceRatio"] = (
-            feature_row["Price"] / feature_row["Competitor Pricing"]
-            if feature_row["Competitor Pricing"] != 0 else 1.0
-        )
 
-    
-    # Update inventory rolling
-    feature_row["Rolling_Inventory_7"] = np.mean(inventory_values[-7:])
+    # Competitor pricing features
+    if "Competitor Pricing" in sp.columns:
+        comp = float(last["Competitor Pricing"])
+        feature_row["PriceDiff"] = feature_row["Price"] - comp
+        feature_row["PriceRatio"] = feature_row["Price"] / comp if comp != 0 else 1.0
+
+    # Inventory rolling
+    feature_row["Rolling_Inventory_7"] = float(np.mean(inv_hist[-7:]))
     feature_row["InventoryChange_7"] = feature_row["Inventory Level"] - feature_row["Rolling_Inventory_7"]
-    
-    # Remove Units Sold and Date (target for prediction, not a feature)
-    feature_row = feature_row.drop(["Units Sold", "Date"])
-    
-    # Convert to DataFrame
-    feature_df = feature_row.to_frame().T
-    return feature_df
 
+    # Drop target + date
+    feature_row = feature_row.drop(["Units Sold", "Date"])
+
+    return feature_row.to_frame().T
 
 def predict_sales_for_date(store_id, product_id, target_date, model, historical_data):
     

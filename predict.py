@@ -57,15 +57,7 @@ def _is_holiday(date):
         thanksgiving = 1 + days_until_thursday + 21
         if day == thanksgiving + 1:
             return 1
-    
-    # Memorial Day (last Monday of May)
-    if month == 5:
-        last_day = pd.Timestamp(year, 5, 31).dayofweek
-        days_back = (last_day - 0) % 7
-        memorial_day = 31 - days_back
-        if day == memorial_day:
-            return 1
-    
+
     # Labor Day (first Monday of September)
     if month == 9 and day <= 7:
         first_day = pd.Timestamp(year, 9, 1).dayofweek

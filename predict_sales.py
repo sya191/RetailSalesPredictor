@@ -223,12 +223,12 @@ def _create_features_for_date(store_id, product_id, target_date, historical_data
     if sp.empty:
         raise ValueError(f"No data for Store {store_id}, Product {product_id}")
 
-    # CASE A — Date exists in historical data -> return REAL feature row
+    # CASE A:  Date exists in historical data -> return REAL feature row
     real_row = sp[sp["Date"] == target_date]
     if not real_row.empty:
         return real_row.drop(columns=["Units Sold", "Date"]).reset_index(drop=True)
 
-    # CASE B — Future prediction -> build synthetic row from last known datapoint
+    # CASE B: Future prediction -> build synthetic row from last known datapoint
     last = sp.iloc[-1].copy()
 
     feature_row = last.copy()
